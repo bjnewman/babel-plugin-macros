@@ -136,6 +136,10 @@ should be installed as one of your project's `devDependencies`:
 npm install --save-dev babel-plugin-macros
 ```
 
+> **Note:** This package is ESM-only and requires **Node.js >= 22**.
+> Babel 7 loads plugins via `require()`, which supports ESM natively starting
+> with Node 22.12+ (`require(esm)`).
+
 ## Usage
 
 > You may like to watch
@@ -186,7 +190,7 @@ issues below:
   [How to force recompile? #19](https://github.com/kentcdodds/babel-plugin-preval/issues/19)
 - graphql.macro:
   [Recompile problem (babel cache) #6](https://github.com/evenchange4/graphql.macro/issues/6)
-- twin.macro: 
+- twin.macro:
   [Can't change taliwind config #37](https://github.com/ben-rogerson/twin.macro/discussions/37)
 
 ## FAQ

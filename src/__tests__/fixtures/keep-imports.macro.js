@@ -1,6 +1,6 @@
-const {createMacro} = require('../../')
+import {createMacro} from '../../../dist/index.js'
 
-module.exports = createMacro(keepImportMacro)
+export default createMacro(keepImportMacro)
 
 function keepImportMacro() {
   return {keepImports: true}

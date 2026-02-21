@@ -1,7 +1,7 @@
 // adds "prefix-" to each `id` attribute
-const {createMacro} = require('../../')
+import {createMacro} from '../../../dist/index.js'
 
-module.exports = createMacro(wrapWidget)
+export default createMacro(wrapWidget)
 
 function wrapWidget({references, babel}) {
   const {types: t} = babel

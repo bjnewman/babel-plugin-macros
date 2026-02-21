@@ -1,7 +1,7 @@
 # `babel-plugin-macros` Usage for users
 
 > See also:
-> [the `author` docs](https://github.com/kentcdodds/babel-plugin-macros/blob/master/other/docs/author.md).
+> [the `author` docs](https://github.com/kentcdodds/babel-plugin-macros/blob/main/other/docs/author.md).
 
 ## Adding the plugin to your config
 
@@ -20,7 +20,7 @@
 **babel.config.js**
 
 ```javascript
-module.exports = function (api) {
+export default function (api) {
   return {
     plugins: ['macros'],
   }
@@ -36,7 +36,8 @@ babel --plugins babel-plugin-macros script.js
 ### Via Node API
 
 ```js
-require('babel-core').transform('code', {
+import {transform} from '@babel/core'
+transform('code', {
   plugins: ['macros'],
 })
 ```
@@ -64,10 +65,8 @@ code in [the `babel-plugin-macros` snapshots][eval-snapshots].
 > can use any macro available. This is part of the benefit of using
 > `babel-plugin-macros`.
 
-[eval-macro]:
-  https://github.com/kentcdodds/babel-plugin-macros/blob/master/src/__tests__/fixtures/eval.macro.js
-[eval-snapshots]:
-  https://github.com/kentcdodds/babel-plugin-macros/blob/master/src/__tests__/__snapshots__/index.js.snap
+[eval-macro]: https://github.com/kentcdodds/babel-plugin-macros/blob/main/src/__tests__/fixtures/eval.macro.js
+[eval-snapshots]: https://github.com/kentcdodds/babel-plugin-macros/blob/main/src/__tests__/__snapshots__/index.js.snap
 
 ### Using with create-react-app
 
@@ -87,7 +86,7 @@ With that being said you can use all the awesomeness of `babel-plugin-macros`
 inside `create-react-app` by running one of the following commands based on your
 situation.
 
-```
+```shell
 $ # Create a new application
 $ npx create-react-app my-app
 $ # Upgrade an existing application
@@ -97,24 +96,30 @@ $ yarn upgrade react-scripts
 ### config
 
 There is a feature that allows you to configure your macro. We use
-[`cosmiconfig`][cosmiconfig] to read a `babel-plugin-macros` configuration which
-can be located in any of the following files up the directories from the
-importing file:
+[`lilconfig`][lilconfig] to read a `babel-plugin-macros` configuration which can
+be located in any of the following files up the directories from the importing
+file:
 
 - `.babel-plugin-macrosrc`
 - `.babel-plugin-macrosrc.json`
 - `.babel-plugin-macrosrc.yaml`
 - `.babel-plugin-macrosrc.yml`
 - `.babel-plugin-macrosrc.js`
+- `.babel-plugin-macrosrc.cjs`
 - `babel-plugin-macros.config.js`
+- `babel-plugin-macros.config.cjs`
 - `babelMacros` in `package.json`
+
+> **Note:** If your project has `"type": "module"` in its `package.json`, Node
+> treats `.js` files as ESM. Use the `.cjs` variants for CommonJS config files
+> (e.g. `babel-plugin-macros.config.cjs` with `module.exports`).
 
 You need to specify your `configName`. EG: For configuring [styled-components
 macro][styled-components], the `configName` is `"styledComponents"`:
 
 ```js
 // babel-plugin-macros.config.js
-module.exports = {
+export default {
   // ...
   // Other macros config
   styledComponents: {
@@ -123,5 +128,5 @@ module.exports = {
 }
 ```
 
-[cosmiconfig]: https://www.npmjs.com/package/cosmiconfig
+[lilconfig]: https://www.npmjs.com/package/lilconfig
 [styled-components]: https://www.styled-components.com/docs/tooling#babel-macro

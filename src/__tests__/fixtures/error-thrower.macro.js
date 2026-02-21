@@ -1,7 +1,7 @@
 // const printAST = require('ast-pretty-print')
-const {createMacro} = require('../../')
+import {createMacro} from '../../../dist/index.js'
 
-module.exports = createMacro(evalMacro)
+export default createMacro(evalMacro)
 
 function evalMacro() {
   throw new Error('very unhelpful')

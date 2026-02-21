@@ -1,8 +1,7 @@
-const {parse} = require('@babel/parser')
-// const printAST = require('ast-pretty-print')
-const {createMacro} = require('../../')
+import {parse} from '@babel/parser'
+import {createMacro} from '../../../dist/index.js'
 
-module.exports = createMacro(evalMacro)
+export default createMacro(evalMacro)
 
 function evalMacro({references, state}) {
   references.default.forEach(referencePath => {

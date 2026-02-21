@@ -1,7 +1,5 @@
 // babel-plugin adding `plugin-` prefix to each "id" JSX attribute
-module.exports = main
-
-function main({types: t}) {
+export default function main({types: t}) {
   return {
     visitor: {
       // intentionally traversing from Program,

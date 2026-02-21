@@ -1,7 +1,7 @@
 # `babel-plugin-macros` Usage for macros authors
 
 > See also:
-> [the `user` docs](https://github.com/kentcdodds/babel-plugin-macros/blob/master/other/docs/user.md).
+> [the `user` docs](https://github.com/kentcdodds/babel-plugin-macros/blob/main/other/docs/user.md).
 
 Is this your first time working with ASTs? Here are some resources:
 
@@ -23,13 +23,13 @@ Is this your first time working with ASTs? Here are some resources:
 A macro is a JavaScript module that exports a function. Here's a simple example:
 
 ```javascript
-const {createMacro} = require('babel-plugin-macros')
+import {createMacro} from 'babel-plugin-macros'
 
 // `createMacro` is simply a function that ensures your macro is only
 // called in the context of a babel transpilation and will throw an
 // error with a helpful message if someone does not have babel-plugin-macros
 // configured correctly
-module.exports = createMacro(myMacro)
+export default createMacro(myMacro)
 
 function myMacro({references, state, babel}) {
   // state is the second argument you're passed to a visitor in a
@@ -117,7 +117,7 @@ visitor function in a normal babel plugin.
 #### babel
 
 This is the same thing you get as an argument to normal babel plugins. It is
-also the same thing you get if you `require('babel-core')`.
+also the same thing you get if you `import * as babel from '@babel/core'`.
 
 #### references
 
@@ -165,8 +165,8 @@ import {foo as FooMacro} from './my.macro'
 
 </details>
 
-From here, it's just a matter of doing stuff with the `BabelPath`s that
-you're given. For that check out [the babel handbook][babel-handbook].
+From here, it's just a matter of doing stuff with the `BabelPath`s that you're
+given. For that check out [the babel handbook][babel-handbook].
 
 > One other thing to note is that after your macro has run, babel-plugin-macros
 > will remove the import/require statement for you.
@@ -183,17 +183,24 @@ To specify that your plugin is configurable, you pass a `configName` to
 `createMacro`.
 
 A configuration is created from data combined from two sources: We use
-[`cosmiconfig`][cosmiconfig] to read a `babel-plugin-macros` configuration which
-can be located in any of the following files up the directories from the
-importing file:
+[`lilconfig`][lilconfig] to read a `babel-plugin-macros` configuration which can
+be located in any of the following files up the directories from the importing
+file:
 
 - `.babel-plugin-macrosrc`
 - `.babel-plugin-macrosrc.json`
 - `.babel-plugin-macrosrc.yaml`
 - `.babel-plugin-macrosrc.yml`
 - `.babel-plugin-macrosrc.js`
+- `.babel-plugin-macrosrc.cjs`
 - `babel-plugin-macros.config.js`
+- `babel-plugin-macros.config.cjs`
 - `babelMacros` in `package.json`
+
+> **Note:** If the user's project has `"type": "module"` in its `package.json`,
+> Node treats `.js` files as ESM. Users should use the `.cjs` variants for
+> CommonJS config files (e.g. `babel-plugin-macros.config.cjs` with
+> `module.exports`).
 
 The content of the config will be merged with the content of the babel macros
 plugin options. Config options take priority.
@@ -201,27 +208,26 @@ plugin options. Config options take priority.
 All together specifying and using the config might look like this:
 
 ```javascript
-// .babel-plugin-macros.config.js
-module.exports = {
+// babel-plugin-macros.config.js
+export default {
   taggedTranslations: {locale: 'en_US'},
 }
 
-// .babel.config.js
-module.exports = {
+// babel.config.js
+export default {
   plugins: [
     [
-      "macros",
+      'macros',
       {
-        taggedTranslations: { locale: "en_GB" },
+        taggedTranslations: {locale: 'en_GB'},
       },
     ],
   ],
 }
 
-
 // taggedTranslations.macro.js
-const {createMacro} = require('babel-plugin-macros')
-module.exports = createMacro(taggedTranslationsMacro, {
+import {createMacro} from 'babel-plugin-macros'
+export default createMacro(taggedTranslationsMacro, {
   configName: 'taggedTranslations',
 })
 function taggedTranslationsMacro({references, state, babel, config}) {
@@ -239,9 +245,9 @@ of macro. If you want to keep it because you have other plugins processing
 macros, return `{ keepImports: true }` from your macro:
 
 ```javascript
-const {createMacro} = require('babel-plugin-macros')
+import {createMacro} from 'babel-plugin-macros'
 
-module.exports = createMacro(taggedTranslationsMacro)
+export default createMacro(taggedTranslationsMacro)
 
 function taggedTranslationsMacro({references, state, babel}) {
   // process node from references
@@ -266,15 +272,15 @@ as possible for you.
 To make it even better, you can throw your own with more context. For example:
 
 ```javascript
-const {createMacro, MacroError} = require('babel-plugin-macros')
+import {createMacro, MacroError} from 'babel-plugin-macros'
 
-module.exports = createMacro(myMacro)
+export default createMacro(myMacro)
 
 function myMacro({references, state, babel}) {
   // something unexpected happens:
   throw new MacroError(
     'Some helpful and contextual message. Learn more: ' +
-      'https://github.com/your-org/your-repo/blob/master/docs/errors.md#learn-more-about-eror-title',
+      'https://github.com/your-org/your-repo/blob/main/docs/errors.md#learn-more-about-error-title',
   )
 }
 ```
@@ -283,6 +289,9 @@ function myMacro({references, state, babel}) {
 
 The best way to test your macro is using [`babel-plugin-tester`][tester]:
 
+> **Note:** `import.meta.filename` requires Node.js >=20.11 or >=21.2. Since
+> this package requires Node 22+, it is always available.
+
 ```javascript
 import pluginTester from 'babel-plugin-tester'
 import plugin from 'babel-plugin-macros'
@@ -290,7 +299,7 @@ import plugin from 'babel-plugin-macros'
 pluginTester({
   plugin,
   snapshot: true,
-  babelOptions: {filename: __filename},
+  babelOptions: {filename: import.meta.filename},
   tests: [
     `
       import MyMacro from '../my.macro'
@@ -319,14 +328,14 @@ Luckily, [@Zemnmez](https://github.com/Zemnmez) created
 straightforward:
 
 ```javascript
-const {doSync} = require('do-sync')
-const {createMacro, MacroError} = require('babel-plugin-macros')
+import {doSync} from 'do-sync'
+import {createMacro, MacroError} from 'babel-plugin-macros'
 
-module.exports = createMacro(myMacro)
+export default createMacro(myMacro)
 
 const getTheFlowers = doSync(async (arg1, arg2) => {
-  const dep = require('some-dependency')
-  const flowers = await dep(arg1, arg2.stuff)
+  const dep = await import('some-dependency')
+  const flowers = await dep.default(arg1, arg2.stuff)
   return flowers
 })
 
@@ -337,10 +346,8 @@ function myMacro({references, state, babel}) {
 ```
 
 [preval]: https://github.com/kentcdodds/babel-plugin-preval
-[babel-handbook]:
-  https://github.com/thejameskyle/babel-handbook/blob/master/translations/en/plugin-handbook.md
+[babel-handbook]: https://github.com/thejameskyle/babel-handbook/blob/master/translations/en/plugin-handbook.md
 [tester]: https://github.com/babel-utils/babel-plugin-tester
 [keyword]: https://docs.npmjs.com/files/package.json#keywords
-[npm-babel-plugin-macros]:
-  https://www.npmjs.com/browse/keyword/babel-plugin-macros
-[cosmiconfig]: https://www.npmjs.com/package/cosmiconfig
+[npm-babel-plugin-macros]: https://www.npmjs.com/browse/keyword/babel-plugin-macros
+[lilconfig]: https://www.npmjs.com/package/lilconfig

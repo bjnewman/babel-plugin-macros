@@ -1,4 +1,4 @@
-const {createMacro} = require('../../')
+import {createMacro} from '../../../dist/index.js'
 
 export default createMacro(evalMacro)
 

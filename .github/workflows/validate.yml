@@ -12,57 +12,80 @@ on:
   pull_request: {}
 jobs:
   main:
-    # ignore all-contributors PRs
     if: ${{ !contains(github.head_ref, 'all-contributors') }}
     strategy:
       matrix:
-        node: [10.13, 12, 14, 15]
+        node: [22, 24]
     runs-on: ubuntu-latest
     steps:
-      - name: ⬇️ Checkout repo
-        uses: actions/checkout@v2
+      - name: Checkout repo
+        uses: actions/checkout@v6
 
-      - name: ⎔ Setup node
-        uses: actions/setup-node@v1
+      - name: Setup node
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
+          package-manager-cache: false
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
+      - name: Cache node_modules
+        uses: actions/cache@v4
         with:
-          useLockFile: false
+          path: node_modules
+          key: node-modules-${{ matrix.node }}-${{ hashFiles('package.json') }}
 
-      - name: ▶️ Run validate script
-        run: npm run validate
+      - name: Install deps
+        run: npm install
 
-      - name: ⬆️ Upload coverage report
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: tsc && c8 --include dist/index.js --reporter text --reporter lcov --reports-dir coverage node --test src/__tests__/*.js
+
+      - name: Upload coverage
+        if: matrix.node == 24
         uses: codecov/codecov-action@v1
 
   release:
     needs: main
     runs-on: ubuntu-latest
-    if:
-      ${{ github.repository == 'kentcdodds/babel-plugin-macros' &&
+    if: ${{ github.repository == 'kentcdodds/babel-plugin-macros' &&
       contains('refs/heads/main,refs/heads/beta,refs/heads/next,refs/heads/alpha',
       github.ref) && github.event_name == 'push' }}
     steps:
-      - name: ⬇️ Checkout repo
-        uses: actions/checkout@v2
+      - name: Checkout repo
+        uses: actions/checkout@v6
 
-      - name: ⎔ Setup node
-        uses: actions/setup-node@v1
+      - name: Setup node
+        uses: actions/setup-node@v6
         with:
-          node-version: 14
+          node-version: 24
+          package-manager-cache: false
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
+      - name: Cache node_modules
+        uses: actions/cache@v4
         with:
-          useLockFile: false
+          path: node_modules
+          key: node-modules-24-${{ hashFiles('package.json') }}
 
-      - name: 🚀 Release
-        uses: cycjimmy/semantic-release-action@v2
+      - name: Install deps
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Release
+        uses: cycjimmy/semantic-release-action@v6
         with:
-          semantic_version: 17
           branches: |
             [
               '+([0-9])?(.{+([0-9]),x}).x',

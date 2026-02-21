@@ -1,1 +1,1 @@
-module.exports = require('./eval.macro')
+export {default} from './eval.macro.js'

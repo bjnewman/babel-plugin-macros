@@ -1,8 +1,8 @@
 // this is a fake version of emotion
 // const printAST = require('ast-pretty-print')
-const {createMacro} = require('../../')
+import {createMacro} from '../../../dist/index.js'
 
-module.exports = createMacro(emotionMacro)
+export default createMacro(emotionMacro)
 
 function emotionMacro({references, babel}) {
   const {types: t} = babel

@@ -1,62 +1,77 @@
-import path from 'path'
-import {cosmiconfigSync as cosmiconfigSyncMock} from 'cosmiconfig'
-import cpy from 'cpy'
-import babel from '@babel/core'
-import pluginTester from 'babel-plugin-tester'
-import plugin from '../'
+import path from 'node:path'
+import fs from 'node:fs'
+import {createRequire} from 'node:module'
+import {describe, it, before, beforeEach, afterEach, mock} from 'node:test'
+import assert from 'node:assert/strict'
+import {pluginTester} from 'babel-plugin-tester'
+import plugin, {_resetConfigExplorer} from '../../dist/index.js'
 
-const projectRoot = path.join(__dirname, '../../')
+// babel-plugin-tester requires these globals
+globalThis.describe = describe
+globalThis.it = it
+globalThis.it.only = (...args) => it(args[0], {only: true}, args[1])
 
-jest.mock('cosmiconfig', () => {
-  const cosmiconfigExports = jest.requireActual('cosmiconfig')
-  const actualCosmiconfigSync = cosmiconfigExports.cosmiconfigSync
-  function fakeCosmiconfigSync(...args) {
-    fakeCosmiconfigSync.explorer = actualCosmiconfigSync(...args)
-    return fakeCosmiconfigSync.explorer
-  }
-  return {...cosmiconfigExports, cosmiconfigSync: fakeCosmiconfigSync}
-})
+const _require = createRequire(import.meta.url)
+const projectRoot = path.join(import.meta.dirname, '../../')
 
-beforeAll(() => {
+before(() => {
   // copy our mock modules to the node_modules directory
   // so we can test how things work when importing a macro
   // from the node_modules directory.
-  return cpy(['**/*.js'], path.join('..', '..', 'node_modules'), {
-    parents: true,
-    cwd: path.join(projectRoot, 'other', 'mock-modules'),
-  })
+  const src = path.join(projectRoot, 'other', 'mock-modules')
+  const dest = path.join(projectRoot, 'node_modules')
+  fs.cpSync(src, dest, {recursive: true})
 })
 
+let consoleErrorMock
 beforeEach(() => {
-  jest.spyOn(console, 'error').mockImplementation(() => {})
+  consoleErrorMock = mock.method(console, 'error', () => {})
 })
 
 afterEach(() => {
-  console.error.mockRestore()
-  jest.clearAllMocks()
-})
-
-expect.addSnapshotSerializer({
-  print(val) {
-    return (
-      val
-        .split(projectRoot)
-        .join('<PROJECT_ROOT>/')
-        .replace(/\\/g, '/')
-        // Remove the path of file which thrown an error
-        .replace(/Error:[^:]*:/, 'Error:')
-    )
-  },
-  test(val) {
-    return typeof val === 'string'
-  },
+  consoleErrorMock.mock.restore()
+  // Clear spy state in fixture macros (ESM modules cached outside require.cache)
+  const configFixtures = [
+    'config',
+    'yaml-config',
+    'cjs-config',
+    'primitive-config',
+    'no-config',
+    'error-config',
+  ]
+  for (const fixture of configFixtures) {
+    try {
+      _require(
+        `./fixtures/${fixture}/configurable.macro.js`,
+      ).realMacro?.mockClear?.()
+    } catch {
+      /* module not yet loaded */
+    }
+  }
+  // Clear spy state in CJS mock modules + flush require.cache
+  const mockModules = [
+    'babel-plugin-macros-test-fake/macro',
+    '@scope/package/macro',
+    'babel-plugin-macros-test-transpiled/macro',
+  ]
+  for (const name of mockModules) {
+    try {
+      const mod = _require(name)
+      mod.innerFn?.mockClear?.()
+    } catch {
+      /* module not yet loaded */
+    }
+    // CJS modules live in require.cache — delete to get fresh spies
+    const resolved = _require.resolve(name)
+    delete _require.cache[resolved]
+  }
+  _resetConfigExplorer()
 })
 
 pluginTester({
   plugin,
-  snapshot: true,
   babelOptions: {
-    filename: __filename,
+    filename: import.meta.filename,
     parserOpts: {
       plugins: ['jsx'],
     },
@@ -65,21 +80,23 @@ pluginTester({
   tests: [
     {
       title: 'does nothing to code that does not import macro',
-      snapshot: false,
       code: `
         import foo from './some-file-without-macro'
-
+        const bar = require('./some-other-file-without-macro')
+      `,
+      output: `
+        import foo from './some-file-without-macro'
         const bar = require('./some-other-file-without-macro')
       `,
     },
     {
       title: 'does nothing but remove macros if it is unused',
-      snapshot: true,
       code: `
         import foo from "./fixtures/eval.macro";
 
         const bar = 42;
       `,
+      output: `const bar = 42`,
     },
     {
       title: 'raises an error if macro does not exist',
@@ -95,6 +112,7 @@ pluginTester({
         import myEval from './fixtures/eval.macro'
         const x = myEval\`34 + 45\`
       `,
+      output: `const x = 79`,
     },
     {
       title: 'works with require',
@@ -102,6 +120,7 @@ pluginTester({
         const evaler = require('./fixtures/eval.macro')
         const x = evaler\`34 + 45\`
       `,
+      output: `const x = 79`,
     },
     {
       title: 'works with require destructuring',
@@ -115,6 +134,11 @@ pluginTester({
           composes: \${red}
           color: blue;
         \`
+      `,
+      output: `
+        const red = 'background-color: red;'
+        const Div = styled.div\`composes: background-color: red;
+          color: blue;\`
       `,
     },
     {
@@ -130,6 +154,11 @@ pluginTester({
           color: blue;
         \`
       `,
+      output: `
+        const red = 'background-color: red;'
+        const Div = STYLED.div\`composes: background-color: red;
+          color: blue;\`
+      `,
     },
     {
       title: 'works with function calls',
@@ -137,6 +166,7 @@ pluginTester({
         import myEval from './fixtures/eval.macro'
         const x = myEval('34 + 45')
       `,
+      output: `const x = 79`,
     },
     {
       title: 'Works as a JSXElement',
@@ -144,6 +174,7 @@ pluginTester({
         import MyEval from './fixtures/eval.macro'
         const x = <MyEval>34 + 45</MyEval>
       `,
+      output: `const x = 79`,
     },
     {
       title: 'Supports named imports',
@@ -158,15 +189,29 @@ pluginTester({
           color: blue;
         \`
       `,
+      output: `
+        const red = 'background-color: red;'
+        const Div = STYLED.div\`composes: background-color: red;
+          color: blue;\`
+      `,
     },
     {
-      title: 'supports compiled macros (`__esModule` + `export default`)',
+      title: 'supports macros with default export',
       code: `
         import {css, styled} from './fixtures/emotion-esm.macro'
         const red = css\`
           background-color: red;
         \`
 
+        const Div = styled.div\`
+          composes: \${red}
+          color: blue;
+        \`
+      `,
+      output: `
+        const red = css\`
+          background-color: red;
+        \`
         const Div = styled.div\`
           composes: \${red}
           color: blue;
@@ -179,27 +224,20 @@ pluginTester({
         import fakeMacro from 'babel-plugin-macros-test-fake/macro'
         fakeMacro('hi')
       `,
+      output: `fakeMacro('hi')`,
       teardown() {
-        try {
-          // kinda abusing the babel-plugin-tester API here
-          // to make an extra assertion
-          // eslint-disable-next-line
-          const fakeMacro = require('babel-plugin-macros-test-fake/macro')
-          expect(fakeMacro.innerFn).toHaveBeenCalledTimes(1)
-          expect(fakeMacro.innerFn).toHaveBeenCalledWith({
-            references: expect.any(Object),
-            source: expect.stringContaining(
-              'babel-plugin-macros-test-fake/macro',
-            ),
-            state: expect.any(Object),
-            babel: expect.any(Object),
-            isBabelMacrosCall: true,
-          })
-          expect(fakeMacro.innerFn.mock.calls[0].babel).toBe(babel)
-        } catch (e) {
-          console.error(e)
-          throw e
-        }
+        const fakeMacro = _require('babel-plugin-macros-test-fake/macro')
+        assert.equal(fakeMacro.innerFn.calls.length, 1)
+        const callArgs = fakeMacro.innerFn.calls[0][0]
+        assert.ok(callArgs.references)
+        assert.ok(
+          callArgs.source.includes('babel-plugin-macros-test-fake/macro'),
+        )
+        assert.ok(callArgs.state)
+        assert.ok(callArgs.babel)
+        assert.equal(callArgs.isBabelMacrosCall, true)
+        assert.ok(callArgs.babel.types)
+        assert.equal(typeof callArgs.babel.transform, 'function')
       },
     },
     {
@@ -208,25 +246,38 @@ pluginTester({
         import fakeMacro from '@scope/package/macro'
         fakeMacro('hi')
       `,
+      output: `fakeMacro('hi')`,
       teardown() {
-        try {
-          // kinda abusing the babel-plugin-tester API here
-          // to make an extra assertion
-          // eslint-disable-next-line
-          const fakeMacro = require('@scope/package/macro')
-          expect(fakeMacro.innerFn).toHaveBeenCalledTimes(1)
-          expect(fakeMacro.innerFn).toHaveBeenCalledWith({
-            references: expect.any(Object),
-            source: expect.stringContaining('@scope/package/macro'),
-            state: expect.any(Object),
-            babel: expect.any(Object),
-            isBabelMacrosCall: true,
-          })
-          expect(fakeMacro.innerFn.mock.calls[0].babel).toBe(babel)
-        } catch (e) {
-          console.error(e)
-          throw e
-        }
+        const fakeMacro = _require('@scope/package/macro')
+        assert.equal(fakeMacro.innerFn.calls.length, 1)
+        const callArgs = fakeMacro.innerFn.calls[0][0]
+        assert.ok(callArgs.references)
+        assert.ok(callArgs.source.includes('@scope/package/macro'))
+        assert.ok(callArgs.state)
+        assert.ok(callArgs.babel)
+        assert.equal(callArgs.isBabelMacrosCall, true)
+        assert.ok(callArgs.babel.types)
+        assert.equal(typeof callArgs.babel.transform, 'function')
+      },
+    },
+    {
+      title: 'supports transpiled ESM macros from node_modules',
+      code: `
+        import fakeMacro from 'babel-plugin-macros-test-transpiled/macro'
+        fakeMacro('hi')
+      `,
+      output: `fakeMacro('hi')`,
+      teardown() {
+        const fakeMacro = _require('babel-plugin-macros-test-transpiled/macro')
+        assert.equal(fakeMacro.innerFn.calls.length, 1)
+        const callArgs = fakeMacro.innerFn.calls[0][0]
+        assert.ok(callArgs.references)
+        assert.ok(
+          callArgs.source.includes('babel-plugin-macros-test-transpiled/macro'),
+        )
+        assert.ok(callArgs.state)
+        assert.ok(callArgs.babel)
+        assert.equal(callArgs.isBabelMacrosCall, true)
       },
     },
     {
@@ -235,6 +286,10 @@ pluginTester({
         const macro = require('./fixtures/keep-imports.macro')
         const red = macro('noop');
       `,
+      output: `
+        const macro = require('./fixtures/keep-imports.macro')
+        const red = macro('noop')
+      `,
     },
     {
       title: 'optionally keep imports (import declaration)',
@@ -242,19 +297,32 @@ pluginTester({
         import macro from './fixtures/keep-imports.macro'
         const red = macro('noop');
       `,
+      output: `
+        import macro from './fixtures/keep-imports.macro'
+        const red = macro('noop')
+      `,
     },
     {
       title:
-        'optionally keep imports in combination with babel-preset-env (#80)',
+        'optionally keep imports in combination with CJS module transform (#80)',
       code: `
         import macro from './fixtures/keep-imports.macro'
         const red = macro('noop')
       `,
       babelOptions: {
-        plugins: [
-          require.resolve('babel-plugin-transform-es2015-modules-commonjs'),
-        ],
+        plugins: [_require.resolve('@babel/plugin-transform-modules-commonjs')],
       },
+      output: `
+        'use strict'
+
+        var _keepImports = _interopRequireDefault(
+          require('./fixtures/keep-imports.macro'),
+        )
+        function _interopRequireDefault(e) {
+          return e && e.__esModule ? e : {default: e}
+        }
+        const red = (0, _keepImports.default)('noop')
+      `,
     },
     {
       title: 'throws an error if the macro is not properly wrapped',
@@ -299,70 +367,89 @@ pluginTester({
     },
     {
       title: 'macros can set their configName and get their config',
-      fixture: path.join(__dirname, 'fixtures/config/code.js'),
+      fixture: path.join(import.meta.dirname, 'fixtures/config/code.js'),
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
       teardown() {
-        try {
-          const babelMacrosConfig = require('./fixtures/config/babel-plugin-macros.config')
-          const configurableMacro = require('./fixtures/config/configurable.macro')
-          expect(configurableMacro.realMacro).toHaveBeenCalledTimes(1)
-          expect(configurableMacro.realMacro.mock.calls[0][0].config).toEqual(
-            babelMacrosConfig[configurableMacro.configName],
-          )
-
-          configurableMacro.realMacro.mockClear()
-        } catch (e) {
-          console.error(e)
-          throw e
-        }
+        const babelMacrosConfig = _require(
+          './fixtures/config/babel-plugin-macros.config.js',
+        ).default
+        const configurableMacro = _require(
+          './fixtures/config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        assert.deepEqual(
+          configurableMacro.realMacro.calls[0][0].config,
+          babelMacrosConfig[configurableMacro.configName],
+        )
+      },
+    },
+    {
+      title: 'macros can load config from a YAML file',
+      fixture: path.join(import.meta.dirname, 'fixtures/yaml-config/code.js'),
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
+      teardown() {
+        const configurableMacro = _require(
+          './fixtures/yaml-config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        assert.deepEqual(configurableMacro.realMacro.calls[0][0].config, {
+          fileConfig: true,
+          yamlConfig: true,
+        })
+      },
+    },
+    {
+      title: 'macros can load config from a CJS config file',
+      fixture: path.join(import.meta.dirname, 'fixtures/cjs-config/code.js'),
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
+      teardown() {
+        const configurableMacro = _require(
+          './fixtures/cjs-config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        assert.deepEqual(configurableMacro.realMacro.calls[0][0].config, {
+          cjsConfig: true,
+        })
       },
     },
     {
       title:
         'when there is an error reading the config, a helpful message is logged',
       error: true,
-      fixture: path.join(__dirname, 'fixtures/config/code.js'),
-      setup() {
-        jest
-          .spyOn(cosmiconfigSyncMock.explorer, 'search')
-          .mockImplementationOnce(() => {
-            throw new Error('this is a cosmiconfig error')
-          })
-        jest.spyOn(console, 'error').mockImplementationOnce(() => {})
-        return function teardown() {
-          try {
-            expect(console.error).toHaveBeenCalledTimes(1)
-            expect(console.error.mock.calls[0]).toMatchSnapshot()
-            console.error.mockClear()
-          } catch (e) {
-            console.error(e)
-            console.error.mockClear()
-            throw e
-          }
-        }
+      fixture: path.join(import.meta.dirname, 'fixtures/error-config/code.js'),
+      teardown() {
+        assert.equal(consoleErrorMock.mock.callCount(), 1)
+        const message = consoleErrorMock.mock.calls[0].arguments[0]
+        assert.equal(
+          message,
+          'There was an error trying to load the config "configurableMacro" ' +
+            'for the macro imported from "./configurable.macro. ' +
+            'Please see the error thrown for more information.',
+        )
       },
     },
     {
       title: 'when there is no config to load, then no config is passed',
-      fixture: path.join(__dirname, 'fixtures/config/code.js'),
-      setup() {
-        jest
-          .spyOn(cosmiconfigSyncMock.explorer, 'search')
-          .mockImplementationOnce(() => {
-            return null
-          })
-        return function teardown() {
-          try {
-            const configurableMacro = require('./fixtures/config/configurable.macro')
-            expect(configurableMacro.realMacro).toHaveBeenCalledTimes(1)
-            expect(configurableMacro.realMacro.mock.calls[0][0].config).toEqual(
-              {},
-            )
-            configurableMacro.realMacro.mockClear()
-          } catch (e) {
-            console.error(e)
-            throw e
-          }
-        }
+      fixture: path.join(import.meta.dirname, 'fixtures/no-config/code.js'),
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
+      teardown() {
+        const configurableMacro = _require(
+          './fixtures/no-config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        assert.deepEqual(configurableMacro.realMacro.calls[0][0].config, {})
       },
     },
     {
@@ -373,68 +460,68 @@ pluginTester({
           somePluginConfig: true,
         },
       },
-      fixture: path.join(__dirname, 'fixtures/config/code.js'),
+      fixture: path.join(import.meta.dirname, 'fixtures/config/code.js'),
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
       teardown() {
-        try {
-          const configurableMacro = require('./fixtures/config/configurable.macro')
-          expect(configurableMacro.realMacro).toHaveBeenCalledTimes(1)
-          expect(configurableMacro.realMacro.mock.calls[0][0].config).toEqual({
-            fileConfig: true,
-            someConfig: true,
-            somePluginConfig: true,
-          })
-          configurableMacro.realMacro.mockClear()
-        } catch (e) {
-          console.error(e)
-          throw e
-        }
+        const configurableMacro = _require(
+          './fixtures/config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        assert.deepEqual(configurableMacro.realMacro.calls[0][0].config, {
+          fileConfig: true,
+          someConfig: true,
+          somePluginConfig: true,
+        })
       },
     },
     {
-      title: 'when configuration is specified in plugin options',
+      title: 'when configuration is specified in plugin options (CJS)',
       pluginOptions: {
         configurableMacro: {
           someConfig: false,
           somePluginConfig: true,
         },
       },
-      fixture: path.join(__dirname, 'fixtures/config/cjs-code.js'),
+      fixture: path.join(import.meta.dirname, 'fixtures/config/cjs-code.js'),
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
       teardown() {
-        try {
-          const configurableMacro = require('./fixtures/config/configurable.macro')
-          expect(configurableMacro.realMacro).toHaveBeenCalledTimes(1)
-          expect(configurableMacro.realMacro.mock.calls[0][0].config).toEqual({
-            fileConfig: true,
-            someConfig: true,
-            somePluginConfig: true,
-          })
-          configurableMacro.realMacro.mockClear()
-        } catch (e) {
-          console.error(e)
-          throw e
-        }
+        const configurableMacro = _require(
+          './fixtures/config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        assert.deepEqual(configurableMacro.realMacro.calls[0][0].config, {
+          fileConfig: true,
+          someConfig: true,
+          somePluginConfig: true,
+        })
       },
     },
     {
       title: 'when configuration is specified incorrectly in plugin options',
-      fixture: path.join(__dirname, 'fixtures/config/code.js'),
+      fixture: path.join(import.meta.dirname, 'fixtures/config/code.js'),
       pluginOptions: {
         configurableMacro: 2,
       },
+      output: `
+        // eslint-disable-next-line babel/no-unused-expressions
+        configured\`stuff\`
+      `,
       teardown() {
-        try {
-          const configurableMacro = require('./fixtures/config/configurable.macro')
-          expect(configurableMacro.realMacro).toHaveBeenCalledTimes(1)
-          expect(configurableMacro.realMacro).not.toHaveBeenCalledWith(
-            expect.objectContaining({
-              config: expect.any,
-            }),
-          )
-          configurableMacro.realMacro.mockClear()
-        } catch (e) {
-          console.error(e)
-          throw e
-        }
+        const configurableMacro = _require(
+          './fixtures/config/configurable.macro.js',
+        )
+        assert.equal(configurableMacro.realMacro.calls.length, 1)
+        // invalid plugin option (2) is ignored; file config used as-is
+        assert.deepEqual(configurableMacro.realMacro.calls[0][0].config, {
+          fileConfig: true,
+          someConfig: true,
+        })
       },
     },
     {
@@ -448,6 +535,7 @@ pluginTester({
         import myEval from './fixtures/eval-macro.js'
         const x = myEval\`34 + 45\`
       `,
+      output: `const x = 79`,
     },
     {
       title: 'when a custom isMacrosName option is used on a require',
@@ -460,12 +548,16 @@ pluginTester({
         const evaler = require('./fixtures/eval-macro.js')
         const x = evaler\`34 + 45\`
       `,
+      output: `const x = 79`,
     },
     {
       title:
         'when plugin options configuration cannot be merged with file configuration',
       error: true,
-      fixture: path.join(__dirname, 'fixtures/primitive-config/code.js'),
+      fixture: path.join(
+        import.meta.dirname,
+        'fixtures/primitive-config/code.js',
+      ),
       pluginOptions: {
         configurableMacro: {},
       },
@@ -474,12 +566,16 @@ pluginTester({
       title:
         'when a plugin that replaces paths is used, macros still work properly',
       fixture: path.join(
-        __dirname,
+        import.meta.dirname,
         'fixtures/path-replace-issue/variable-assignment.js',
       ),
       babelOptions: {
         babelrc: true,
       },
+      output: `
+        const result = ('foobar', 42)
+        global.result = result
+      `,
     },
     {
       title: 'Macros are applied in the order respecting plugins order',
@@ -489,10 +585,17 @@ pluginTester({
         const bar = Wrap(<div id="d1"><p id="p1"></p></div>);
       `,
       babelOptions: {
-        presets: [{plugins: [require('./fixtures/jsx-id-prefix.plugin')]}],
+        presets: [
+          {plugins: [_require('./fixtures/jsx-id-prefix.plugin.js').default]},
+        ],
       },
+      output: `
+        const bar = Wrap(
+          <div id="plugin-macro-d1">
+            <p id="plugin-macro-p1"></p>
+          </div>,
+        )
+      `,
     },
   ],
 })
-
-/* eslint no-console:0 */
